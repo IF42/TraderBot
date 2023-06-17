@@ -3,6 +3,11 @@ TODO:
 * Treat for bad bassword or user_id, better information is needed
 * Logging of the internal operations for traded every symbol for further analysis
 * Refactor the code to be cleaner
+* Add version signature with with output into command line
+* Reaction to network disconnect
+* budget control for prevent trials for too expansive trasactions
+* synchronize witch trading server time
+* add time stamp to output 
 """
 
 import talib 
@@ -14,6 +19,7 @@ from getpass import getpass
 import os
 import enum
 import datetime
+import time
 
 
 class Prediction(enum.Enum):
@@ -46,7 +52,7 @@ class Symbol:
         self.status   = status
 
     def predict(self) -> Prediction:
-        t = talib.RSI(self.history, timeperiod = 7)[-1]
+        t = talib.RSI(self.history, timeperiod = 14)[-1]
 
         if t > 70:
             return Prediction.BUY
@@ -70,7 +76,7 @@ class Trader:
         self.symbols = []
 
         for symbol in traded_symbols:
-            history = list(map(lambda x: x["close"], self.client.get_lastn_candle_history(symbol, 60, 10)))
+            history = list(map(lambda x: x["close"], self.client.get_lastn_candle_history(symbol, 60, 5)))
             self.symbols.append(Symbol(symbol, np.array(history)))
 
     def trade(self):
@@ -93,41 +99,34 @@ class Trader:
                     try:
                         if prediction == Prediction.BUY:
                             if symbol.status == TradeStatus.NOTHING:
-                                """
-                                BUY LONG
-                                """
-                                self.client.open_trade('buy', symbol.name, 0.8)
+                                # BUY LONG
+                                self.client.open_trade('buy', symbol.name, 0.1)
                                 symbol.update_trade_status(TradeStatus.LONG)
                             elif symbol.status == TradeStatus.SHORT:
-                                """
-                                SELL SHORT
-                                """
+                                # SELL SHORT
                                 trades = trader.client.update_trades()
                                 trade_id = list(filter(lambda r: r[0] == symbol.name, [(x[1].symbol, x[0]) for x in trades.items()]))[0][1]
                                 self.client.close_trade(trade_id)
                                 symbol.update_trade_status(TradeStatus.NOTHING)
                         elif prediction == Prediction.SELL:
                             if symbol.status == TradeStatus.NOTHING:
-                                """
-                                BUY SHORT
-                                """
-                                self.client.open_trade('sell', symbol.name, 0.8)
+                                # BUY SHORT
+                                self.client.open_trade('sell', symbol.name, 0.1)
                                 symbol.update_trade_status(TradeStatus.SHORT)
                             elif symbol.status == TradeStatus.LONG:
-                                """
-                                SELL LONG
-                                """
+                                # SELL LONG
                                 trades = trader.client.update_trades()
                                 trade_id = list(filter(lambda r: r[0] == symbol.name, [(x[1].symbol, x[0]) for x in trades.items()]))[0][1]
                                 self.client.close_trade(trade_id)
                                 symbol.update_trade_status(TradeStatus.NOTHING)
                     except Exception as e:
                         print(f"An exception occurred: {str(e)}")
-                else:
-                    step -= 1
-                    self.client.ping()
 
-        time.sleep(10)
+            else:
+                step -= 1
+                self.client.ping()
+
+            time.sleep(10)
 
 
 def clear_screen():
@@ -159,7 +158,7 @@ if __name__ == "__main__":
     Trader instance with trading loop
     TODO: treat login error 
     """
-    trader = Trader(traded_symbols, cfg["ID"], password, cfg["mode"])
+    trader = Trader(cfg["ID"], password, cfg["mode"], traded_symbols)
     trader.trade()    
 
 
