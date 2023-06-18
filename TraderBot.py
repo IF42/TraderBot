@@ -1,18 +1,19 @@
 """
 TODO:
-* Treat for bad bassword or user_id, better information is needed
+* Treat for bad password or user_id, better information is needed
 * Logging of the internal operations for traded every symbol for further analysis
 * Refactor the code to be cleaner
 * Add version signature with with output into command line
 * Reaction to network disconnect
-* budget control for prevent trials for too expansive trasactions
+* budget control for prevent trials for too expansive transactions
 * synchronize witch trading server time
 * add time stamp to output 
+* add more trading strategies
 """
+
 
 import talib 
 from XTBApi.api import Client, LOGGER
-LOGGER.propagate = False
 import numpy as np
 import json
 from getpass import getpass
@@ -22,16 +23,19 @@ import datetime
 import time
 
 
+LOGGER.propagate = False
+
+
 class Prediction(enum.Enum):
-  NOTHING = 0
-  BUY     = 1
-  SELL    = 2
+    WAIT = 0
+    BUY  = 1
+    SELL = 2
 
 
 class TradeStatus(enum.Enum):
-  NOTHING = 0
-  SHORT   = 1
-  LONG    = 2
+    NOTHING = 0
+    SHORT   = 1
+    LONG    = 2
 
 
 class Symbol:
@@ -39,20 +43,31 @@ class Symbol:
     Container for historical data of given symbol with mathematical 
     analysis of the next step
     """
-    def __init__(self, name, history):
-        self.name    = name
-        self.history = history
-        self.status  = TradeStatus.NOTHING
+    def __init__(self, name, opens, highs, lows, closes):
+        self.name   = name
+        self.opens  = opens
+        self.highs  = highs
+        self.lows   = lows
+        self.closes = closes
+        self.status = TradeStatus.NOTHING
 
-    def update_history(self, value):
-        self.history = self.history[1:]
-        self.history = np.append(self.history, value)
+    def update_history(self, opens, highs, lows, closes):
+        self.opens = self.opens[1:]
+        self.highs = self.highs[1:]
+        self.lows = self.lows[1:]
+        self.closes = self.closes[1:]
+
+        self.opens = np.append(self.opens, opens)
+        self.highs = np.append(self.highs, highs)
+        self.lows = np.append(self.lows, lows)
+        self.closes = np.append(self.closes, closes)
 
     def update_trade_status(self, status):
-        self.status   = status
+        self.status = status
 
     def predict(self) -> Prediction:
-        t = talib.RSI(self.history, timeperiod = 14)[-1]
+        """
+        t = talib.RSI(self.closes, timeperiod = 14)[-1]
 
         if t > 70:
             return Prediction.BUY
@@ -60,14 +75,24 @@ class Symbol:
             return Prediction.SELL
         else:
             return Prediction.NOTHING
-    
+        """
+        
+        t = talib.CDLDOJI(self.opens, self.highs, self.lows, self.closes)
+        
+        if t[-1] > 0:
+            return Prediction.BUY
+        elif t[-1] < 0:
+            return Prediction.SELL
+        else:
+            return Prediction.WAIT
+
 
 class Trader:
     """
     Trader class represents connection with Broker. In this class 
-    continuously readed current state of the market and 
+    continuously read current state of the market and
     analyzed if to buy (short/long) or to sell
-	TODO: initialize Symbol list with current open trades on trade server
+    TODO: initialize Symbol list with current open trades on trade server
     """
 
     def __init__(self, user_id, password, mode, traded_symbols):
@@ -76,23 +101,36 @@ class Trader:
         self.symbols = []
 
         for symbol in traded_symbols:
-            history = list(map(lambda x: x["close"], self.client.get_lastn_candle_history(symbol, 60, 5)))
-            self.symbols.append(Symbol(symbol, np.array(history)))
+            candle_history = self.client.get_lastn_candle_history(symbol, 60, 60)
+            
+            closes = list(map(lambda x: x["close"], candle_history))
+            opens  = list(map(lambda x: x["open"], candle_history))
+            highs  = list(map(lambda x: x["high"], candle_history))
+            lows   = list(map(lambda x: x["low"], candle_history))
+
+            self.symbols.append(Symbol(symbol, np.array(opens), np.array(highs), np.array(lows), np.array(closes)))
 
     def trade(self):
         step = 0
 
         while True:
-            if(step == 0):
+            if step == 0:
                 step = 6
 
                 for symbol in self.symbols:
                     # skip closed markets
-                    if trader.client.check_if_market_open([symbol.name])[symbol.name] == False:
+                    if not trader.client.check_if_market_open([symbol.name])[symbol.name]:
                         continue
 
-                    close = self.client.get_lastn_candle_history(symbol.name, 60, 1)[0]["close"]
-                    symbol.update_history(close)
+                    candle_history = self.client.get_lastn_candle_history(symbol.name, 60, 1)
+                    
+                    closes = list(map(lambda x: x["close"], candle_history))
+                    opens  = list(map(lambda x: x["open"], candle_history))
+                    highs  = list(map(lambda x: x["high"], candle_history))
+                    lows   = list(map(lambda x: x["low"], candle_history))
+
+                    symbol.update_history(opens, highs, lows, closes)
+
                     prediction = symbol.predict()
                     print(f"{symbol.name}: {prediction}")
 
@@ -100,7 +138,7 @@ class Trader:
                         if prediction == Prediction.BUY:
                             if symbol.status == TradeStatus.NOTHING:
                                 # BUY LONG
-                                self.client.open_trade('buy', symbol.name, 0.1)
+                                self.client.open_trade('buy', symbol.name, 0.2)
                                 symbol.update_trade_status(TradeStatus.LONG)
                             elif symbol.status == TradeStatus.SHORT:
                                 # SELL SHORT
@@ -111,7 +149,7 @@ class Trader:
                         elif prediction == Prediction.SELL:
                             if symbol.status == TradeStatus.NOTHING:
                                 # BUY SHORT
-                                self.client.open_trade('sell', symbol.name, 0.1)
+                                self.client.open_trade('sell', symbol.name, 0.2)
                                 symbol.update_trade_status(TradeStatus.SHORT)
                             elif symbol.status == TradeStatus.LONG:
                                 # SELL LONG
@@ -121,7 +159,6 @@ class Trader:
                                 symbol.update_trade_status(TradeStatus.NOTHING)
                     except Exception as e:
                         print(f"An exception occurred: {str(e)}")
-
             else:
                 step -= 1
                 self.client.ping()
@@ -130,7 +167,7 @@ class Trader:
 
 
 def clear_screen():
-    if(os.name == 'posix'):
+    if os.name == 'posix':
         os.system("clear")
     else:
         os.system("cls")
@@ -149,7 +186,7 @@ if __name__ == "__main__":
     """
     Loading of login password from command line
     """
-    password = getpass("Password: ")
+    password = "4xl74fx0.H" #getpass("Password: ")
     clear_screen()    
 
     print("Trader bot is starting...")
