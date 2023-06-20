@@ -10,8 +10,8 @@ import Symbol
 
 LOGGER.propagate = False
 
-history_test  = 50
-history_valid = 300
+history_test  = 100
+history_valid = 500
 
 
 
@@ -19,7 +19,7 @@ class Backtester:
     def __init__(self, user_id, password, mode, test_symbol):
         self.client = Client()
         self.client.login(user_id, password, mode)
-        candle_history = self.client.get_lastn_candle_history(test_symbol, 300, history_test+history_valid)
+        candle_history = self.client.get_lastn_candle_history(test_symbol, 15*60, history_test+history_valid)
         
         self.opens  = list(map(lambda x: x["open"], candle_history))
         self.highs  = list(map(lambda x: x["high"], candle_history))
@@ -38,10 +38,20 @@ class Backtester:
         buy = [0 for _ in range(history_test)]
         sell = [0 for _ in range(history_test)]
 
-
-        for c in self.closes[:history_valid]:
-            self.symbol.update_history(0, 0, 0, c)
+        for o,h,l,c in zip(self.opens[:history_valid], self.highs[:history_valid], self.lows[:history_valid], self.closes[:history_valid]):
+            self.symbol.update_history(o, h, l, c)
             prediction = self.symbol.predict()
+            
+            if prediction == Symbol.Prediction.BUY:
+                if self.symbol.status == Symbol.TradeStatus.NOTHING:
+                    self.symbol.status = Symbol.TradeStatus.LONG
+                else:
+                    self.symbol.status = Symbol.TradeStatus.NOTHING
+            elif prediction == Symbol.Prediction.SELL:
+                if self.symbol.status == Symbol.TradeStatus.NOTHING:
+                    self.symbol.status = Symbol.TradeStatus.SHORT
+                else:
+                    self.symbol.status = Symbol.TradeStatus.NOTHING
 
             if prediction == Symbol.Prediction.BUY:
                 buy.append(1)
@@ -53,13 +63,13 @@ class Backtester:
                 buy.append(0)
                 sell.append(0)
 
-        plt.plot(np.array(x), np.array(y))
+        plt.plot(np.array(x), np.array(y), label=self.symbol.name)
         plt.scatter([x[i] for i in range(len(buy)) if buy[i] == 1], 
                                 [y[i] for i in range(len(buy)) if buy[i] == 1], 
-                                c='red', marker='o')
+                                c='green', marker='o', label="buy")
         plt.scatter([x[i] for i in range(len(sell)) if sell[i] == 1], 
                                 [y[i] for i in range(len(sell)) if sell[i] == 1], 
-                                c='blue', marker='o')
+                                c='red', marker='o', label="sell")
 
         plt.show()
 
@@ -77,7 +87,7 @@ if __name__ == "__main__":
     cfg_file = open('config.json')
     cfg = json.load(cfg_file)    
 
-    password = getpass("Password: ")
+    password = "4xl74fx0.H" #getpass("Password: ")
     
     backtester = Backtester(cfg["ID"], password, cfg["mode"], args.backtest_symbol)
     backtester.test()

@@ -22,7 +22,7 @@ import enum
 import datetime
 import time
 import argparse
-import Symbol
+from Symbol import Symbol, Prediction, TradeStatus
 
 LOGGER.propagate = False
 
@@ -46,30 +46,27 @@ class Trader:
         self.symbols = []
 
         for symbol in traded_symbols:
-            candle_history = self.client.get_lastn_candle_history(symbol, 300, 50)
+            candle_history = self.client.get_lastn_candle_history(symbol, 900, 100)
             
             closes = list(map(lambda x: x["close"], candle_history))
             opens  = list(map(lambda x: x["open"], candle_history))
             highs  = list(map(lambda x: x["high"], candle_history))
             lows   = list(map(lambda x: x["low"], candle_history))
 
-            self.symbols.append(Symbol.Symbol(symbol, np.array(opens), np.array(highs), np.array(lows), np.array(closes)))
-
-    def __trade_action__(self):
-            
+            self.symbols.append(Symbol(symbol, np.array(opens), np.array(highs), np.array(lows), np.array(closes)))
 
     def trade(self):
         step = 0
 
         while True:
             if step == 0:
-                step = 30
+                step = 6*15
                 for symbol in self.symbols:
                     # skip closed markets
                     if not trader.client.check_if_market_open([symbol.name])[symbol.name]:
                         continue
 
-                    candle_history = self.client.get_lastn_candle_history(symbol.name, 300, 1)
+                    candle_history = self.client.get_lastn_candle_history(symbol.name, 900, 1)
                     
                     closes = list(map(lambda x: x["close"], candle_history))
                     opens  = list(map(lambda x: x["open"], candle_history))
@@ -116,15 +113,11 @@ class Trader:
 
 
 def clear_screen():
-    #if os.name == 'posix':
-    #    os.system("clear")
-    #else:
-    os.system("clear")
+    if os.name == 'posix':
+        os.system("clear")
+    else:
+        os.system("clear")
 
-
-
-
-def trading_mode():
 
 if __name__ == "__main__":
     """

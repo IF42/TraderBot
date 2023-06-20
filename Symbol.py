@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
 import enum
+from sklearn.cluster import KMeans
+
 
 
 class Prediction(enum.Enum):
@@ -29,6 +30,18 @@ class Symbol:
         self.closes = closes
         self.status = TradeStatus.NOTHING
 
+        X = pd.DataFrame({
+            'Open': opens
+            , 'High': highs
+            , 'Low': lows
+            , 'Close': closes})
+
+        X_normalized = (X - X.mean()) / X.std()
+
+        self.kmeans = KMeans(n_clusters=2, n_init=10)
+        self.kmeans.fit(X_normalized)
+        
+
     def update_history(self, opens, highs, lows, closes):
         self.opens = self.opens[1:]
         self.highs = self.highs[1:]
@@ -44,26 +57,29 @@ class Symbol:
         self.status = status
 
     def predict(self) -> Prediction:
-        """
-        t = talib.CDLDOJI(self.opens, self.highs, self.lows, self.closes)
+        X = pd.DataFrame({
+            'Open': self.opens
+            , 'High': self.highs
+            , 'Low': self.lows
+            , 'Close': self.closes})
+
+        X_normalized = (X - X.mean()) / X.std()
+        new_cluster_labels = self.kmeans.predict(X_normalized)
+
+        cluster_counts = np.bincount(new_cluster_labels)
+        most_common_cluster = np.argmax(cluster_counts)
+    
         
-        if t[-1] > 0:
+        sell_signals = np.where(new_cluster_labels == most_common_cluster, 1, 0)
+        buy_signals = np.where(new_cluster_labels != most_common_cluster, 1, 0)
+        
+        if buy_signals[-1] == 1 and sell_signals[-1] == 1:
+            return Prediction.WAIT
+        elif buy_signals[-1] == 1:
             return Prediction.BUY
-        elif t[-1] < 0:
-            return Prediction.SELL
+        elif sell_signals[-1] == 1:
+           return Prediction.SELL
         else:
             return Prediction.WAIT
-
-        """
-        t = ta.rsi(close=pd.Series(self.closes), length = 3)
-        
-        if t.values[-1] > 80:
-            return Prediction.BUY
-        elif t.values[-1] < 20:
-            return Prediction.SELL
-        else:
-            return Prediction.WAIT
-
-
-
+    
 
