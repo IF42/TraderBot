@@ -12,9 +12,8 @@ class Prediction(enum.Enum):
 
 
 class TradeStatus(enum.Enum):
-    NOTHING = 0
-    SHORT   = 1
-    LONG    = 2
+    SHORT   = 0
+    LONG    = 1
 
 
 class Symbol:
@@ -28,7 +27,7 @@ class Symbol:
         self.highs  = highs
         self.lows   = lows
         self.closes = closes
-        self.status = TradeStatus.NOTHING
+        self.time_stamp = None
 
         X = pd.DataFrame({
             'Open': opens
@@ -40,7 +39,6 @@ class Symbol:
 
         self.kmeans = KMeans(n_clusters=2, n_init=10)
         self.kmeans.fit(X_normalized)
-        
 
     def update_history(self, opens, highs, lows, closes):
         self.opens = self.opens[1:]
@@ -52,9 +50,6 @@ class Symbol:
         self.highs = np.append(self.highs, highs)
         self.lows = np.append(self.lows, lows)
         self.closes = np.append(self.closes, closes)
-
-    def update_trade_status(self, status):
-        self.status = status
 
     def predict(self) -> Prediction:
         X = pd.DataFrame({
@@ -70,8 +65,8 @@ class Symbol:
         most_common_cluster = np.argmax(cluster_counts)
     
         
-        sell_signals = np.where(new_cluster_labels == most_common_cluster, 1, 0)
-        buy_signals = np.where(new_cluster_labels != most_common_cluster, 1, 0)
+        buy_signals = np.where(new_cluster_labels == most_common_cluster, 1, 0)
+        sell_signals = np.where(new_cluster_labels != most_common_cluster, 1, 0)
         
         if buy_signals[-1] == 1 and sell_signals[-1] == 1:
             return Prediction.WAIT

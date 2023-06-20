@@ -5,11 +5,10 @@ TODO:
 * Refactor the code to be cleaner
 * Reaction to network disconnect
 * budget control for prevent trials for too expansive transactions
-* synchronize witch trading server time
 * add time stamp to output 
 * add more trading strategies
-* synchronize open transaction on the server
-* backtesting
+* improve performace in time and order synchronization with server
+* add initial prompt where is summari of open trades
 """
 
 import pandas as pd
@@ -27,7 +26,7 @@ from Symbol import Symbol, Prediction, TradeStatus
 LOGGER.propagate = False
 
 
-__version__   = "0.3.0"
+__version__   = "0.4.0"
 __prog_name__ = "TraderBot" 
 
 
@@ -45,6 +44,8 @@ class Trader:
         self.client.login(user_id, password, mode)
         self.symbols = []
 
+        trades = self.client.update_trades()
+
         for symbol in traded_symbols:
             candle_history = self.client.get_lastn_candle_history(symbol, 900, 100)
             
@@ -53,61 +54,63 @@ class Trader:
             highs  = list(map(lambda x: x["high"], candle_history))
             lows   = list(map(lambda x: x["low"], candle_history))
 
-            self.symbols.append(Symbol(symbol, np.array(opens), np.array(highs), np.array(lows), np.array(closes)))
+            self.symbols.append(
+                    Symbol(symbol
+                           , np.array(opens)
+                           , np.array(highs)
+                           , np.array(lows)
+                           , np.array(closes)))
 
     def trade(self):
-        step = 0
-
         while True:
-            if step == 0:
-                step = 6*15
-                for symbol in self.symbols:
-                    # skip closed markets
-                    if not trader.client.check_if_market_open([symbol.name])[symbol.name]:
-                        continue
+            for symbol in self.symbols:
+                # skip closed markets
+                if not trader.client.check_if_market_open([symbol.name])[symbol.name]:
+                    continue
 
-                    candle_history = self.client.get_lastn_candle_history(symbol.name, 900, 1)
-                    
-                    closes = list(map(lambda x: x["close"], candle_history))
-                    opens  = list(map(lambda x: x["open"], candle_history))
-                    highs  = list(map(lambda x: x["high"], candle_history))
-                    lows   = list(map(lambda x: x["low"], candle_history))
-
-                    symbol.update_history(opens, highs, lows, closes)
-
-                    prediction = symbol.predict()
-                    print(f"{symbol.name}: {prediction}", flush=True)
-
-                    try:
-                        if prediction == Prediction.BUY:
-                            if symbol.status == TradeStatus.NOTHING:
-                                # BUY LONG
-                                self.client.open_trade('buy', symbol.name, 0.2)
-                                symbol.update_trade_status(TradeStatus.LONG)
-                            elif symbol.status == TradeStatus.SHORT:
-                                # SELL SHORT
-                                trades   = [(x[1].symbol, x[0]) for x in trader.client.update_trades().items()] 
-                                trade_id = list(filter(lambda r: r[0] == symbol.name, trades))[0][1]
-                                self.client.close_trade(trade_id)
-                                symbol.update_trade_status(TradeStatus.NOTHING)
-                        elif prediction == Prediction.SELL:
-                            if symbol.status == TradeStatus.NOTHING:
-                                # BUY SHORT
-                                self.client.open_trade('sell', symbol.name, 0.2)
-                                symbol.update_trade_status(TradeStatus.SHORT)
-                            elif symbol.status == TradeStatus.LONG:
-                                # SELL LONG
-                                trades   = [(x[1].symbol, x[0]) for x in trader.client.update_trades().items()] 
-                                trade_id = list(filter(lambda r: r[0] == symbol.name, trades))[0][1]
-                                self.client.close_trade(trade_id)
-                                symbol.update_trade_status(TradeStatus.NOTHING)
-                    except Exception as e:
-                        print(f"An exception occurred: {str(e)}")
+                candle_history = self.client.get_lastn_candle_history(symbol.name, 900, 1)
+                time_stamp = candle_history[0]["timestamp"]
                 
-            else:
-                step -= 1
-                self.client.ping()
-            
+                if symbol.time_stamp == time_stamp:
+                    continue
+
+                symbol.time_stamp = time_stamp
+
+                closes = candle_history[0]["close"]
+                opens  = candle_history[0]["open"]
+                highs  = candle_history[0]["high"]
+                lows   = candle_history[0]["low"]
+
+                symbol.update_history(opens, highs, lows, closes)
+
+                prediction = symbol.predict()
+                print(f"{symbol.name}: {prediction}", flush=True)
+
+                trades = [x[1] for x in self.client.update_trades().items()]
+                symbol_trades = list(filter(lambda x: x.symbol == symbol.name, trades))
+                
+                try:
+                    if symbol_trades == []:
+                        if prediction == Prediction.BUY:
+                            # BUY LONG
+                            print("buy")
+                            self.client.open_trade('buy', symbol.name, 0.2)
+                        elif prediction == Prediction.SELL:
+                            # BUY SHORT
+                            print("sell")
+                            self.client.open_trade('sell', symbol.name, 0.2)
+                    else:
+                        for symbol_trade in symbol_trades:
+                            if prediction == Prediction.BUY and symbol_trade.mode == "sell":
+                                # SELL SHORT
+                                self.client.close_trade(symbol_trade.order_id)
+                            elif prediction == Prediction.SELL and symbol_trade.mode == "buy":
+                                # SELL LONG
+                                self.client.close_trade(symbol_trade.order_id)
+
+                except Exception as e:
+                    print(f"An exception occurred: {str(e)}")
+                
             time.sleep(10)
         
 

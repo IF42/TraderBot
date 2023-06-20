@@ -19,6 +19,7 @@ class Backtester:
     def __init__(self, user_id, password, mode, test_symbol):
         self.client = Client()
         self.client.login(user_id, password, mode)
+        
         candle_history = self.client.get_lastn_candle_history(test_symbol, 15*60, history_test+history_valid)
         
         self.opens  = list(map(lambda x: x["open"], candle_history))
@@ -42,17 +43,6 @@ class Backtester:
             self.symbol.update_history(o, h, l, c)
             prediction = self.symbol.predict()
             
-            if prediction == Symbol.Prediction.BUY:
-                if self.symbol.status == Symbol.TradeStatus.NOTHING:
-                    self.symbol.status = Symbol.TradeStatus.LONG
-                else:
-                    self.symbol.status = Symbol.TradeStatus.NOTHING
-            elif prediction == Symbol.Prediction.SELL:
-                if self.symbol.status == Symbol.TradeStatus.NOTHING:
-                    self.symbol.status = Symbol.TradeStatus.SHORT
-                else:
-                    self.symbol.status = Symbol.TradeStatus.NOTHING
-
             if prediction == Symbol.Prediction.BUY:
                 buy.append(1)
                 sell.append(0)
